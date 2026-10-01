@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classic Flappy Bird</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #222;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+        canvas {
+            border: 4px solid #fff;
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            background-color: #70c5ce; 
+        }
+    </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+let gameStarted = false;
+let score = 0;
+let highscore = localStorage.getItem("classic_highscore") ? parseInt(localStorage.getItem("classic_highscore")) : 0;
+
+// =========================================================================
+// STANDARD CONSTANT SETTINGS
+// =========================================================================
+const HORIZONTAL_PIPE_SPACING = 240; 
+const VERTICAL_PIPE_GAP = 140;       
+const pipeSpeed = 2.0;
+const pipeWidth = 60;
+const groundY = 520;
+
+// =========================================================================
+// ARCADE SOUND SYNTHESIZER
+// =========================================================================
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playArcadeSound(type) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    
+    const osc = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    osc.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    const now = audioCtx.currentTime;
+
+    if (type === 'flap') {
+        osc.type = 'triangle'; 
+        osc.frequency.setValueAtTime(200, now);
+        osc.frequency.exponentialRampToValueAtTime(500, now + 0.1);
+        gainNode.gain.setValueAtTime(0.1, now);
+        gainNode.gain.linearRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+    } else if (type === 'score') {
+        osc.type = 'sine'; 
+        osc.frequency.setValueAtTime(950, now); 
+        gainNode.gain.setValueAtTime(0.08, now);
+        gainNode.gain.linearRampToValueAtTime(0.01, now + 0.15);
+        osc.start(now);
+        osc.stop(now + 0.15);
+    } else if (type === 'hit') {
+        osc.type = 'sawtooth'; 
+        osc.frequency.setValueAtTime(200, now);
+        osc.frequency.linearRampToValueAtTime(60, now + 0.2);
+        gainNode.gain.setValueAtTime(0.2, now);
+        gainNode.gain.linearRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+    }
+}
+
+const bird = {
+    x: 70,
+    y: 280,
+    radius: 14,
+    gravity: 0.4,
+    velocity: 0,
+    jump: -7.0,
+    draw: function() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        
+        let angle = this.velocity * 0.05;
+        if (angle > 0.7) angle = 0.7;
+        if (angle < -0.3) angle = -0.3;
+        ctx.rotate(angle);
+
+        // Classic Yellow Body
+        ctx.beginPath();
+        ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = "#f8d038"; 
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#000";
+        ctx.stroke();
+
+        // Eye
+        ctx.beginPath();
+        ctx.arc(6, -4, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff";
+        ctx.fill();
+        ctx.stroke();
+
+        // Pupil
+        ctx.beginPath();
+        ctx.arc(7, -4, 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#000";
+        ctx.fill();
+
+        // Orange Beak
+        ctx.beginPath();
+        ctx.moveTo(11, -2);
+        ctx.lineTo(19, 1);
+        ctx.lineTo(11, 4);
+        ctx.closePath();
+        ctx.fillStyle = "#f85800";
+        ctx.fill();
+        ctx.stroke();
+
+        // Simple Wing
+        ctx.beginPath();
+        ctx.ellipse(-5, 1, 7, 5, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "#f8f8f8";
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.restore(); 
+    }
+};
+
+const pipes = [];
+
+function spawnPipe() {
+    const minHeight = 60;
+    const maxHeight = groundY - VERTICAL_PIPE_GAP - minHeight; 
+    const topHeight = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
+    pipes.push({
+        x: canvas.width,
+        top: topHeight,
+        passed: false
+    });
+}
+
+function resetGame() {
+    score = 0;
+    bird.y = 280;
+    bird.velocity = 0;
+    pipes.length = 0;
+    gameStarted = false;
+}
+
+function handleControl() {
+    if (!gameStarted) {
+        gameStarted = true;
+    }
+    bird.velocity = bird.jump;
+    playArcadeSound('flap');
+}
+
+window.addEventListener("keydown", function(e) { if (e.code === "Space") handleControl(); });
+canvas.addEventListener("mousedown", handleControl);
+canvas.addEventListener("touchstart", function(e) { e.preventDefault(); handleControl(); });
+
+function drawClassicPipe(x, y, width, height, isTop) {
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = "#000";
+
+    ctx.fillStyle = "#73bf28"; 
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeRect(x, y, width, height);
+
+    const capHeight = 24;
+    const capX = x - 3;
+    const capWidth = width + 6;
+    let capY = isTop ? (y + height - capHeight) : y;
+
+    ctx.fillStyle = "#73bf28";
+    ctx.fillRect(capX, capY, capWidth, capHeight);
+    ctx.strokeRect(capX, capY, capWidth, capHeight);
+}
+
+function update() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Background sky color
+    ctx.fillStyle = "#70c5ce";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    if (gameStarted) {
+        bird.velocity += bird.gravity;
+        bird.y += bird.velocity;
+    }
+
+    // Spawn Pipe Loop
+    if (gameStarted) {
+        if (pipes.length === 0) {
+            spawnPipe();
+        } else {
+            let lastPipe = pipes[pipes.length - 1];
+            if (canvas.width - lastPipe.x >= HORIZONTAL_PIPE_SPACING) {
+                spawnPipe();
+            }
+        }
+    }
+
+    // Process Pipes
+    for (let i = pipes.length - 1; i >= 0; i--) {
+        let p = pipes[i];
+        if (gameStarted) p.x -= pipeSpeed;
+
+        drawClassicPipe(p.x, 0, pipeWidth, p.top, true);
+        drawClassicPipe(p.x, p.top + VERTICAL_PIPE_GAP, pipeWidth, groundY - (p.top + VERTICAL_PIPE_GAP), false);
+
+        // Score system
+        if (!p.passed && p.x + pipeWidth < bird.x) {
+            p.passed = true;
+            score++;
+            playArcadeSound('score');
+            if (score > highscore) {
+                highscore = score;
+                localStorage.setItem("classic_highscore", highscore);
+            }
+        }
+
+        // Collision Check
+        if (bird.x + bird.radius > p.x && bird.x - bird.radius < p.x + pipeWidth) {
+            if (bird.y - bird.radius < p.top || bird.y + bird.radius > p.top + VERTICAL_PIPE_GAP) {
+                playArcadeSound('hit');
+                resetGame();
+            }
+        }
+
+        if (p.x + pipeWidth < 0) pipes.splice(i, 1);
+    }
+
+    // Ceiling and ground rules
+    if (bird.y + bird.radius >= groundY) {
+        playArcadeSound('hit');
+        resetGame();
+    }
+    if (bird.y - bird.radius <= 0) {
+        bird.y = bird.radius;
+        bird.velocity = 0;
+    }
+
+    bird.draw();
+
+    // Solid Classic Ground
+    ctx.fillStyle = "#ded8a0";
+    ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+    ctx.fillStyle = "#73bf28";
+    ctx.fillRect(0, groundY, canvas.width, 15);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, groundY, canvas.width, 2);
+
+    // Scoring Text UI
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 4;
+    ctx.textAlign = "center";
+
+    if (!gameStarted) {
+        ctx.font = "bold 20px Arial";
+        ctx.strokeText("PRESS SPACE TO PLAY", canvas.width / 2, 240);
+        ctx.fillText("PRESS SPACE TO PLAY", canvas.width / 2, 240);
+        
+        ctx.font = "bold 16px Arial";
+        ctx.strokeText(`BEST RECORD: ${highscore}`, canvas.width / 2, 280);
+        ctx.fillText(`BEST RECORD: ${highscore}`, canvas.width / 2, 280);
+    } else {
+        ctx.font = "bold 40px Arial";
+        ctx.strokeText(score, canvas.width / 2, 80);
+        ctx.fillText(score, canvas.width / 2, 80);
+    }
+
+    requestAnimationFrame(update);
+}
+
+resetGame();
+update();
+</script>
+</body>
+</html>
+a
